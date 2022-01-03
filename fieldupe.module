@@ -1,0 +1,366 @@
+<?php
+
+/**
+ * @file
+ * Contains fieldupe.module.
+ */
+
+use Drupal\Core\Routing\RouteMatchInterface;
+use Drupal\Core\Form\FormStateInterface;
+use Drupal\Core\Field\FieldDefinitionInterface;
+use Drupal\Component\Plugin\Factory\DefaultFactory;
+use Drupal\Core\Entity\Display\EntityViewDisplayInterface;
+use Drupal\Core\Field\PluginSettingsInterface;
+use Drupal\Core\Entity\EntityInterface;
+use Drupal\Core\Url;
+
+/**
+ * Implements hook_help().
+ */
+function fieldupe_help($route_name, RouteMatchInterface $route_match) {
+  switch ($route_name) {
+    // Main module help for the fieldupe module.
+    case 'help.page.fieldupe':
+      $output = '';
+      $output .= '<h3>' . t('About') . '</h3>';
+      $output .= '<p>' . t('Allows fields to be reused with different display settings.') . '</p>';
+      return $output;
+
+    default:
+  }
+}
+
+/**
+ * Implements hook_entity_extra_field_info().
+ */
+function fieldupe_entity_extra_field_info() {
+  $extra_fields = [];
+  $fields = \Drupal::service('entity_type.manager')->getStorage('fieldupe')->loadMultiple();
+  foreach ($fields as $field) {
+    $extra_fields[$field->getParentEntityType()][$field->getParentBundle()]['display'][$field->id()] = [
+      'label' => $field->label(),
+      'description' => t('Provides a dupe of @field', ['@field' => $field->getParentField()]),
+      'weight' => 0,
+      'visible' => FALSE,
+    ];
+  }
+  return $extra_fields;
+}
+
+/**
+ * Implements hook_entity_view_alter().
+ */
+function fieldupe_entity_view_alter(array &$build, EntityInterface $entity, EntityViewDisplayInterface $display) {
+  $definitions = [];
+  foreach ($display->getComponents() as $id => $definition) {
+    if (substr($id, 0, 9) == 'fieldupe_') {
+      $definitions[$id] = $definition;
+    }
+  }
+  if (!empty($definitions)) {
+    $fields = \Drupal::service('entity_type.manager')->getStorage('fieldupe')->loadMultiple(array_keys($definitions));
+    foreach ($fields as $field) {
+      $definition = $definitions[$field->id()];
+      $render = $entity->{$field->getParentField()}->view($field->getOptionsForViewMode($display->getMode()));
+      $render['#weight'] = $definition['weight'];
+      $render['#title'] = $field->label();
+      $build[$field->id()] = $render;
+    }
+  }
+}
+
+/**
+ * Implements hook_form_FORM_ID_alter().
+ */
+function fieldupe_form_entity_view_display_edit_form_alter(&$form, FormStateInterface $form_state) {
+  /** @var \Drupal\Core\Entity\EntityFormInterface $form_object */
+  $form_object = $form_state->getFormObject();
+  /** @var \Drupal\Core\Entity\Entity\EntityViewDisplay $entity */
+  $entity = $form_object->getEntity();
+  $entity_type_id = $form['#entity_type'];
+  $bundle = $form['#bundle'];
+  $field_definitions = \Drupal::service('entity.manager')->getFieldDefinitions($entity_type_id, $bundle);
+  $fields = \Drupal::service('entity_type.manager')->getStorage('fieldupe')->loadByProperties([
+    'parent_entity_type' => $entity_type_id,
+    'parent_bundle' => $bundle,
+  ]);
+  if (empty($fields)) {
+    return;
+  }
+  $entity_type_definition = \Drupal::entityTypeManager()->getDefinition($entity_type_id);
+
+  foreach ($fields as $field) {
+    if (!empty($form['fields'][$field->id()])) {
+      $field_name = $field->getParentField();
+      $field_definition = $field_definitions[$field_name];
+      $parent_element = $form['fields'][$field_name];
+      $element = &$form['fields'][$field->id()];
+
+      // Once configured, the form state contains the full settings array of
+      // the duped field.
+      $form_state_options = $form_state->get($field->id());
+      $form_state_options = is_array($form_state_options) ? $form_state_options : [];
+
+      $component_options = $field->getOptionsForViewMode($entity->getMode());
+      $component_options = is_array($component_options) ? $component_options : [];
+
+      // Merge in state values, saved values, and default values.
+      $options = $form_state_options + $component_options + [
+        'label' => $parent_element['label']['#default_value'],
+        'type' => $parent_element['plugin']['type']['#default_value'],
+        'settings' => [],
+        'third_party_settings' => [],
+      ];
+
+      $type_state_value = $form_state->getValue(['fields', $field->id(), 'type']);
+      if ($type_state_value) {
+        $options['type'] = $type_state_value;
+      }
+
+      $element['empty_cell'] = $parent_element['label'];
+      if (!empty($options['label'])) {
+        $element['empty_cell']['#default_value'] = $options['label'];
+      }
+      $element['plugin'] = $parent_element['plugin'];
+      $element['plugin']['type']['#title'] = t('Plugin for @title', ['@title' => $field->label()]);
+      $element['plugin']['type']['#parents'] = ['fields', $field->id(), 'type'];
+      $element['plugin']['type']['#default_value'] = $options['type'];
+      $element['plugin']['#title'] = t('Formatter for @title', ['@title' => $field->label()]);
+      $element['plugin']['settings_edit_form'] = [];
+
+      $base_button = [
+        '#submit' => ['::multistepSubmit'],
+        '#ajax' => [
+          'callback' => '::multistepAjax',
+          'wrapper' => 'field-display-overview-wrapper',
+          'effect' => 'fade',
+        ],
+        '#field_name' => $field->id(),
+      ];
+
+      $plugin = fieldupe_get_renderer($entity, $field_definition, $options);
+      if ($form_state->get('plugin_settings_edit') == $field->id()) {
+        $options_form = $plugin->settingsForm($form, $form_state);
+        $third_party_settings_form = fieldupe_third_party_settings_form($plugin, $field_definition, $form, $form_state);
+
+        $element['plugin']['#cell_attributes'] = ['colspan' => 3];
+        $element['plugin']['settings_edit_form'] = [
+          '#type' => 'container',
+          '#attributes' => ['class' => ['field-plugin-settings-edit-form']],
+          '#parents' => ['fields', $field->id(), 'settings_edit_form'],
+          'label' => [
+            '#markup' => t('Plugin settings'),
+          ],
+          'settings' => $options_form,
+          'third_party_settings' => $third_party_settings_form,
+          'actions' => [
+            '#type' => 'actions',
+            'save_settings' => $base_button + [
+              '#type' => 'submit',
+              '#button_type' => 'primary',
+              '#name' => $field->id() . '_plugin_settings_update',
+              '#value' => t('Update'),
+              '#op' => 'update',
+            ],
+            'cancel_settings' => $base_button + [
+              '#type' => 'submit',
+              '#name' => $field->id() . '_plugin_settings_cancel',
+              '#value' => t('Cancel'),
+              '#op' => 'cancel',
+              // Do not check errors for the 'Cancel' button, but make sure we
+              // get the value of the 'plugin type' select.
+              '#limit_validation_errors' => [['fields', $field->id(), 'type']],
+            ],
+          ],
+        ];
+        $element['plugin']['settings_edit_form']['actions']['save_settings']['#submit'][] = 'fieldupe_form_entity_view_display_edit_form_multistep_submit';
+        $element['#attributes']['class'][] = 'field-plugin-settings-editing';
+      }
+      else {
+        $summary = $plugin->settingsSummary();
+        if (!empty($summary)) {
+          $element['settings_summary'] = [
+            '#type' => 'inline_template',
+            '#template' => '<div class="field-plugin-summary">{{ summary|safe_join("<br />") }}</div>',
+            '#context' => ['summary' => $summary],
+            '#cell_attributes' => ['class' => ['field-plugin-summary-cell']],
+          ];
+        }
+
+        if ($entity->getOriginalMode() == 'default') {
+          $element['settings_edit']['delete'] = [
+            '#type' => 'link',
+            '#title' => t('Delete'),
+            '#url' => Url::fromRoute("field_ui.fieldupe_delete_$entity_type_id.display", [
+              $entity_type_definition->getBundleEntityType() => $bundle,
+              'fieldupe' => $field->id(),
+            ]),
+          ];
+        }
+        else {
+          $element['settings_edit']['delete'] = [
+            '#type' => 'link',
+            '#title' => t('Delete'),
+            '#url' => Url::fromRoute("field_ui.fieldupe_delete_$entity_type_id.display.view_mode", [
+              $entity_type_definition->getBundleEntityType() => $bundle,
+              'fieldupe' => $field->id(),
+              'view_mode_name' => $entity->getOriginalMode(),
+            ]),
+          ];
+        }
+
+        // Check selected plugin settings to display edit link or not.
+        $options_form = $plugin->settingsForm($form, $form_state);
+        $third_party_settings_form = fieldupe_third_party_settings_form($plugin, $field_definition, $form, $form_state);
+        if (!empty($options_form) || !empty($third_party_settings_form)) {
+          $element['settings_edit']['edit'] = $base_button + [
+            '#type' => 'image_button',
+            '#name' => $field->id() . '_settings_edit',
+            '#src' => 'core/misc/icons/787878/cog.svg',
+            '#attributes' => ['class' => ['field-plugin-settings-edit'], 'alt' => t('Edit')],
+            '#op' => 'edit',
+            // Do not check errors for the 'Edit' button, but make sure we get
+            // the value of the 'plugin type' select.
+            '#limit_validation_errors' => [['fields', $field->id(), 'type']],
+            '#prefix' => '<div class="field-plugin-settings-edit-wrapper">',
+            '#suffix' => '</div>',
+          ];
+        }
+      }
+
+      // Store for use during save.
+      $form_state->set($field->id(), $options);
+    }
+  }
+  $form['actions']['submit']['#submit'][] = 'fieldupe_form_entity_view_display_edit_form_submit';
+}
+
+/**
+ * Entity display form validation handler.
+ */
+function fieldupe_form_entity_view_display_edit_form_multistep_submit(&$form, FormStateInterface $form_state) {
+  /** @var \Drupal\Core\Entity\EntityFormInterface $form_object */
+  $form_object = $form_state->getFormObject();
+  /** @var \Drupal\Core\Entity\Entity\EntityViewDisplay $entity */
+  $entity = $form_object->getEntity();
+  $entity_type_id = $form['#entity_type'];
+  $bundle = $form['#bundle'];
+  $fields = \Drupal::service('entity_type.manager')->getStorage('fieldupe')->loadByProperties([
+    'parent_entity_type' => $entity_type_id,
+    'parent_bundle' => $bundle,
+  ]);
+  $plugin_manager = \Drupal::service('plugin.manager.field.formatter');
+  foreach ($fields as $field) {
+    if ($form_state->get('plugin_settings_update') === $field->id()) {
+      $options = $entity->getComponent($field->id());
+      $values = $form_state->getValue(['fields', $field->id()]);
+      $options = [
+        'label' => $values['empty_cell'],
+        'type' => $values['type'],
+      ] + $options;
+      $default_settings = $plugin_manager->getDefaultSettings($options['type']);
+      $options['settings'] = isset($values['settings_edit_form']['settings']) ? array_intersect_key($values['settings_edit_form']['settings'], $default_settings) : [];
+      $options['third_party_settings'] = isset($values['settings_edit_form']['third_party_settings']) ? $values['settings_edit_form']['third_party_settings'] : [];
+      $form_state->set($field->id(), $options);
+      $entity->setComponent($field->id(), $options);
+      $form_state->set('plugin_settings_update', NULL);
+    }
+  }
+}
+
+/**
+ * Entity display form submit handler.
+ */
+function fieldupe_form_entity_view_display_edit_form_submit(&$form, FormStateInterface $form_state) {
+  /** @var \Drupal\Core\Entity\EntityFormInterface $form_object */
+  $form_object = $form_state->getFormObject();
+  /** @var \Drupal\Core\Entity\Entity\EntityViewDisplay $entity */
+  $entity = $form_object->getEntity();
+  $entity_type_id = $form['#entity_type'];
+  $bundle = $form['#bundle'];
+  $fields = \Drupal::service('entity_type.manager')->getStorage('fieldupe')->loadByProperties([
+    'parent_entity_type' => $entity_type_id,
+    'parent_bundle' => $bundle,
+  ]);
+  foreach ($fields as $field) {
+    /** @var \Drupal\fieldupe\Entity\FieldupeInterface $field */
+    if ($form_state->getValue(['fields', $field->id(), 'region']) == 'hidden') {
+      $entity->removeComponent($field->id());
+    }
+    else {
+      $options = $form_state->get($field->id());
+      if (empty($options)) {
+        $options = [
+          'type' => $form_state->getValue([
+            'fields',
+            $field->id(),
+            'type',
+          ]),
+        ];
+      }
+      $options['label'] = $form_state->getValue([
+        'fields',
+        $field->id(),
+        'empty_cell',
+      ]);
+      $component_options = $entity->getComponent($field->id());
+      $options += is_array($component_options) ? $component_options : [];
+
+      $options['weight'] = $form_state->getValue([
+        'fields',
+        $field->id(),
+        'weight',
+      ]);
+      $field->setOptionsForViewMode($entity->getMode(), $options)->save();
+    }
+  }
+  $entity->save();
+}
+
+/**
+ * Gets field formatter plugin instance.
+ */
+function fieldupe_get_renderer(EntityViewDisplayInterface $entity, $field_definition, $options) {
+  $plugin_manager = \Drupal::service('plugin.manager.field.formatter');
+  return $plugin_manager->getInstance([
+    'field_definition' => $field_definition,
+    'view_mode' => $entity->getOriginalMode(),
+    'configuration' => $options,
+  ]);
+}
+
+/**
+ * Adds the widget or formatter third party settings forms.
+ *
+ * @param \Drupal\Core\Field\PluginSettingsInterface $plugin
+ *   The widget or formatter.
+ * @param \Drupal\Core\Field\FieldDefinitionInterface $field_definition
+ *   The field definition.
+ * @param array $form
+ *   The (entire) configuration form array.
+ * @param \Drupal\Core\Form\FormStateInterface $form_state
+ *   The form state.
+ *
+ * @return array
+ *   The widget or formatter third party settings form.
+ */
+function fieldupe_third_party_settings_form(PluginSettingsInterface $plugin, FieldDefinitionInterface $field_definition, array $form, FormStateInterface $form_state) {
+  $options_form = [];
+  $module_handler = \Drupal::moduleHandler();
+  // Invoke hook_field_formatter_third_party_settings_form(), keying resulting
+  // subforms by module name.
+  /** @var \Drupal\Core\Entity\EntityFormInterface $form_object */
+  $form_object = $form_state->getFormObject();
+  /** @var \Drupal\Core\Entity\Entity\EntityViewDisplay $entity */
+  $entity = $form_object->getEntity();
+  foreach ($module_handler->getImplementations('field_formatter_third_party_settings_form') as $module) {
+    $options_form[$module] = $module_handler->invoke($module, 'field_formatter_third_party_settings_form', [
+      $plugin,
+      $field_definition,
+      $entity->getMode(),
+      $form,
+      $form_state,
+    ]);
+  }
+  return $options_form;
+}

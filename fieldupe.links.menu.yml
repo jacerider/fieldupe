@@ -1,0 +1,8 @@
+
+# Field Dupe menu items definition
+entity.fieldupe.collection:
+  title: 'Field Dupe'
+  route_name: entity.fieldupe.collection
+  description: 'List Field Dupe (bundles)'
+  parent: system.admin_structure
+  weight: 99

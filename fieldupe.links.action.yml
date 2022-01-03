@@ -1,0 +1,9 @@
+entity.fieldupe.add_form:
+  route_name: entity.fieldupe.add_form
+  title: 'Add Field Dupe'
+  appears_on:
+    - entity.fieldupe.collection
+
+fieldupe.add:
+  class: \Drupal\Core\Menu\LocalActionDefault
+  deriver: \Drupal\fieldupe\Plugin\Derivative\FieldupeLocalAction

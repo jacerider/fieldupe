@@ -1,0 +1,24 @@
+fieldupe.fieldupe.*:
+  type: config_entity
+  label: 'Fieldupe config'
+  mapping:
+    id:
+      type: string
+      label: 'ID'
+    label:
+      type: label
+      label: 'Label'
+    parent_entity_type:
+      type: string
+      label: 'Entity type'
+    parent_bundle:
+      type: string
+      label: 'Bundle'
+    parent_field:
+      type: string
+      label: 'Field'
+    options:
+      type: sequence
+      label: 'Options'
+    uuid:
+      type: string

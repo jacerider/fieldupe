@@ -1,0 +1,5 @@
+name: 'Fieldupe'
+type: module
+description: 'Allows fields to be reused with different display settings.'
+core: 8.x
+package: 'Custom'
