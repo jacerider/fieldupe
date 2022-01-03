@@ -9,6 +9,7 @@ use Drupal\Core\Routing\RouteMatchInterface;
 use Drupal\Core\Form\FormStateInterface;
 use Drupal\Core\Field\FieldDefinitionInterface;
 use Drupal\Component\Plugin\Factory\DefaultFactory;
+use Drupal\Component\Utility\Html;
 use Drupal\Core\Entity\Display\EntityViewDisplayInterface;
 use Drupal\Core\Field\PluginSettingsInterface;
 use Drupal\Core\Entity\EntityInterface;
@@ -64,6 +65,7 @@ function fieldupe_entity_view_alter(array &$build, EntityInterface $entity, Enti
       $render = $entity->{$field->getParentField()}->view($field->getOptionsForViewMode($display->getMode()));
       $render['#weight'] = $definition['weight'];
       $render['#title'] = $field->label();
+      $render['#attributes']['class'][] = Html::getClass($field->id());
       $build[$field->id()] = $render;
     }
   }
@@ -79,7 +81,7 @@ function fieldupe_form_entity_view_display_edit_form_alter(&$form, FormStateInte
   $entity = $form_object->getEntity();
   $entity_type_id = $form['#entity_type'];
   $bundle = $form['#bundle'];
-  $field_definitions = \Drupal::service('entity.manager')->getFieldDefinitions($entity_type_id, $bundle);
+  $field_definitions = \Drupal::service('entity_field.manager')->getFieldDefinitions($entity_type_id, $bundle);
   $fields = \Drupal::service('entity_type.manager')->getStorage('fieldupe')->loadByProperties([
     'parent_entity_type' => $entity_type_id,
     'parent_bundle' => $bundle,

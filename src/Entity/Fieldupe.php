@@ -35,6 +35,14 @@ use Drupal\Core\Config\Entity\ConfigEntityBase;
  *     "edit-form" = "/admin/structure/fieldupe/{fieldupe}/edit",
  *     "delete-form" = "/admin/structure/fieldupe/{fieldupe}/delete",
  *     "collection" = "/admin/structure/fieldupe"
+ *   },
+ *   config_export = {
+ *     "id",
+ *     "label",
+ *     "parent_entity_type",
+ *     "parent_bundle",
+ *     "parent_field",
+ *     "options",
  *   }
  * )
  */
@@ -137,7 +145,7 @@ class Fieldupe extends ConfigEntityBase implements FieldupeInterface {
    */
   public function calculateDependencies() {
     parent::calculateDependencies();
-    $parent_fields = \Drupal::entityManager()->getFieldDefinitions($this->getParentEntityType(), $this->getParentBundle());
+    $parent_fields = \Drupal::service('entity_field.manager')->getFieldDefinitions($this->getParentEntityType(), $this->getParentBundle());
     $this->addDependency($parent_fields[$this->getParentField()]->getConfigDependencyKey(), $parent_fields[$this->getParentField()]->getConfigDependencyName());
     return $this;
   }

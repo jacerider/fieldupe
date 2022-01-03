@@ -64,7 +64,7 @@ class FieldupeDeleteForm extends EntityConfirmFormBase {
 
     $this->entity->delete();
 
-    drupal_set_message(
+    \Drupal::messenger()->addMessage(
       $this->t('content @type: deleted @label.',
         [
           '@type' => $this->entity->bundle(),

@@ -8,14 +8,36 @@ use Drupal\Core\Url;
 use Drupal\field_ui\FieldUI;
 
 /**
- * Class FieldupeForm.
+ * Fieldupe create/edit form.
  */
 class FieldupeForm extends EntityForm {
 
+  /**
+   * The entity being used by this form.
+   *
+   * @var \Drupal\fieldupe\Entity\FieldupeInterface
+   */
+  protected $entity;
+
+  /**
+   * The parent entity type id.
+   *
+   * @var string
+   */
   protected $parentEntityTypeId;
 
+  /**
+   * The parent entity bundle.
+   *
+   * @var string
+   */
   protected $parentEntityBundle;
 
+  /**
+   * The parent view mode.
+   *
+   * @var string
+   */
   protected $parentViewModeName;
 
   /**
@@ -35,7 +57,7 @@ class FieldupeForm extends EntityForm {
     $form = parent::form($form, $form_state);
 
     $fieldupe = $this->entity;
-    $fields = $this->entityManager->getFieldDefinitions($this->parentEntityTypeId, $this->parentEntityBundle);
+    $fields = \Drupal::service('entity_field.manager')->getFieldDefinitions($this->parentEntityTypeId, $this->parentEntityBundle);
 
     $options = array_map(function ($field) {
       return $field->getLabel();
@@ -69,7 +91,7 @@ class FieldupeForm extends EntityForm {
   public function save(array $form, FormStateInterface $form_state) {
     $fieldupe = $this->entity;
     $fieldname = $form_state->getValue('parent_field');
-    $fields = $this->entityManager->getFieldDefinitions($this->parentEntityTypeId, $this->parentEntityBundle);
+    $fields = \Drupal::service('entity_field.manager')->getFieldDefinitions($this->parentEntityTypeId, $this->parentEntityBundle);
 
     $fieldupe->set('id', $this->getUniqueMachineName($fieldname));
     $fieldupe->set('parent_entity_type', $this->parentEntityTypeId);
@@ -82,13 +104,13 @@ class FieldupeForm extends EntityForm {
 
     switch ($status) {
       case SAVED_NEW:
-        drupal_set_message($this->t('Created the %label Field Dupe.', [
+        \Drupal::messenger()->addStatus($this->t('Created the %label Field Dupe.', [
           '%label' => $fieldupe->label(),
         ]));
         break;
 
       default:
-        drupal_set_message($this->t('Saved the %label Field Dupe.', [
+        \Drupal::messenger()->addStatus($this->t('Saved the %label Field Dupe.', [
           '%label' => $fieldupe->label(),
         ]));
     }

@@ -1,6 +1,6 @@
 services:
   fieldupe.subscriber:
     class: Drupal\fieldupe\Routing\RouteSubscriber
-    arguments: ['@entity.manager']
+    arguments: ['@entity_type.manager']
     tags:
      - { name: event_subscriber }
